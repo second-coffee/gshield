@@ -1,6 +1,8 @@
-# Secure Wrapper Service (TypeScript + Hono)
+# gshield — Shield Google Agent Wrapper
 
 Production-focused restricted Gmail + Google Calendar wrapper for agent callers.
+
+Built for least-privilege agent access: agents can call approved functions without direct access to Google credentials or broad account data.
 
 ## Security controls implemented
 
