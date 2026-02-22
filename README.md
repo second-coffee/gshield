@@ -116,6 +116,81 @@ Create `~/Library/LaunchAgents/com.local.secure-wrapper.plist` under dedicated u
 - Never expose OAuth tokens or raw credential files in API responses.
 - Agent only receives API key and short-lived tokens.
 
+## OpenClaw deployment (recommended)
+
+### Goal
+Run gshield as a local sidecar service that agents can call, while Google credentials remain inaccessible to agent processes.
+
+### 1) Install as dedicated service user
+Use a separate OS account (example: `wrappersvc`) from the account running OpenClaw agents.
+
+```bash
+# as wrappersvc
+cd /home/wrappersvc/gshield
+npm install
+npm run setup -- --gmail-account you@domain.com --calendar-id primary --port 8787 --bind 127.0.0.1
+```
+
+This generates `config/wrapper-config.json` with API/auth/policy defaults.
+
+### 2) Lock down permissions
+
+```bash
+chmod 700 config logs
+chmod 600 config/wrapper-config.json
+```
+
+Only the wrapper service user should be able to read this file.
+
+### 3) Run as background service
+
+Linux (`systemd --user` under wrappersvc):
+
+```ini
+[Unit]
+Description=gshield service
+After=network-online.target
+
+[Service]
+WorkingDirectory=/home/wrappersvc/gshield
+ExecStart=/usr/bin/npm start
+Environment=NODE_ENV=production
+Restart=on-failure
+
+[Install]
+WantedBy=default.target
+```
+
+macOS (`launchd`): run `npm start` from a LaunchAgent under the dedicated wrapper user.
+
+### 4) Keep network scope local
+- Bind only to `127.0.0.1`
+- Do not expose gshield port publicly
+- Prefer host firewall deny-by-default for inbound
+
+### 5) Connect OpenClaw safely
+- Give agent/tooling only gshield API credentials (not Google OAuth tokens)
+- Restrict agent tool access to gshield endpoints only
+- Keep OpenClaw agent process as non-root user
+
+### 6) Policy knobs to set before production
+In `config/wrapper-config.json`:
+- `policy.email.maxRecentDays` (default 2)
+- `policy.email.returnSensitiveAuth` (keep `false`)
+- `policy.calendar.defaultThisWeek`, `maxPastDays`, `maxFutureDays`
+- `policy.outbound.replyOnlyDefault` (recommended `true`)
+- `policy.outbound.recipientAllowlist` / `domainAllowlist`
+- `policy.outbound.maxSendsPerHour` / `maxSendsPerDay`
+
+### 7) State files (database question)
+gshield currently uses local state files (no external DB required):
+- `config/wrapper-config.json` (policy + auth config)
+- `logs/audit.jsonl` (append-only audit events)
+- `logs/token-replay.json` (token replay protection)
+- `logs/send-counters.json` (outbound quota counters)
+
+For multi-host/high-availability setups, you can replace replay/quota local files with Redis/Postgres later.
+
 ## Tests
 
 ```bash
