@@ -56,6 +56,7 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
   });
 
   app.get('/v1/email/unread', async (c) => {
+    if (cfg.features?.emailEnabled === false) return asErr(c, 403, 'email_disabled');
     const days = clampEmailDays(c.req.query('days') || null, cfg.policy.email.maxRecentDays);
     const raw = await p.getUnreadEmails(days);
     const items = raw.map((m) => {
@@ -68,6 +69,7 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
   });
 
   app.get('/v1/calendar/events', async (c) => {
+    if (cfg.features?.calendarEnabled === false) return asErr(c, 403, 'calendar_disabled');
     const range = clampCalendarRange({ start: c.req.query('start'), end: c.req.query('end'), maxPastDays: cfg.policy.calendar.maxPastDays, maxFutureDays: cfg.policy.calendar.maxFutureDays, defaultThisWeek: cfg.policy.calendar.defaultThisWeek });
     const raw = await p.getCalendarEvents(range.start.toISOString(), range.end.toISOString());
     const items = raw.map((e) => ({ id: e.id, summary: e.summary || '', start: e.start?.dateTime || e.start?.date || null, end: e.end?.dateTime || e.end?.date || null, location: e.location || '' }));
@@ -76,6 +78,7 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
   });
 
   app.post('/v1/email/reply', async (c) => {
+    if (cfg.features?.emailEnabled === false) return asErr(c, 403, 'email_disabled');
     const body = await parseJsonLimited(c, cfg.server.maxPayloadBytes);
     if (body === null) return asErr(c, 413, 'payload_too_large');
     if (!body.threadId || !body.to || !body.subject || !body.body) return asErr(c, 400, 'missing_fields');
@@ -89,6 +92,7 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
   });
 
   app.post('/v1/email/send', async (c) => {
+    if (cfg.features?.emailEnabled === false) return asErr(c, 403, 'email_disabled');
     if (cfg.policy.outbound.replyOnlyDefault) return asErr(c, 403, 'reply_only_mode');
     const body = await parseJsonLimited(c, cfg.server.maxPayloadBytes);
     if (body === null) return asErr(c, 413, 'payload_too_large');

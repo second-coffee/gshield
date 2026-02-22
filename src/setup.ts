@@ -11,9 +11,11 @@ const gmailAccount = arg('--gmail-account');
 const calendarId = arg('--calendar-id', 'primary')!;
 const port = Number(arg('--port', '8787'));
 const bind = arg('--bind', '127.0.0.1')!;
+const enableEmail = (arg('--enable-email', 'true') || 'true').toLowerCase() !== 'false';
+const enableCalendar = (arg('--enable-calendar', 'true') || 'true').toLowerCase() !== 'false';
 
-if (!gmailAccount) {
-  console.error('Usage: npm run setup -- --gmail-account <account> [--calendar-id primary] [--port 8787] [--bind 127.0.0.1]');
+if ((enableEmail || enableCalendar) && !gmailAccount) {
+  console.error('Usage: npm run setup -- --gmail-account <account> [--calendar-id primary] [--enable-email true|false] [--enable-calendar true|false] [--port 8787] [--bind 127.0.0.1]');
   process.exit(1);
 }
 
@@ -30,7 +32,11 @@ const cfg: WrapperConfig = {
     previousTokenSigningKey: '',
     tokenTtlSeconds: 120
   },
-  gmail: { account: gmailAccount },
+  features: {
+    emailEnabled: enableEmail,
+    calendarEnabled: enableCalendar
+  },
+  gmail: { account: gmailAccount || '' },
   calendar: { id: calendarId },
   policy: {
     email: {

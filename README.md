@@ -68,6 +68,10 @@ Allowed by default subject to allowlist + send caps.
 ### `POST /v1/email/send`
 Blocked when `policy.outbound.replyOnlyDefault=true`.
 
+### Feature toggles
+- If `features.emailEnabled=false`, email endpoints return `403 email_disabled`
+- If `features.calendarEnabled=false`, calendar endpoint returns `403 calendar_disabled`
+
 ## Config highlights
 
 - `auth.apiKey`: static secret for low-friction auth
@@ -128,7 +132,7 @@ Use a separate OS account (example: `wrappersvc`) from the account running OpenC
 # as wrappersvc
 cd /home/wrappersvc/gshield
 npm install
-npm run setup -- --gmail-account you@domain.com --calendar-id primary --port 8787 --bind 127.0.0.1
+npm run setup -- --gmail-account you@domain.com --calendar-id primary --enable-email true --enable-calendar true --port 8787 --bind 127.0.0.1
 ```
 
 This generates `config/wrapper-config.json` with API/auth/policy defaults.
@@ -175,6 +179,7 @@ macOS (`launchd`): run `npm start` from a LaunchAgent under the dedicated wrappe
 
 ### 6) Policy knobs to set before production
 In `config/wrapper-config.json`:
+- `features.emailEnabled` / `features.calendarEnabled` (turn either surface on/off)
 - `policy.email.maxRecentDays` (default 2)
 - `policy.email.returnSensitiveAuth` (keep `false`)
 - `policy.calendar.defaultThisWeek`, `maxPastDays`, `maxFutureDays`

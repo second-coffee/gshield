@@ -11,6 +11,10 @@ export type WrapperConfig = {
     previousTokenSigningKey?: string;
     tokenTtlSeconds: number;
   };
+  features: {
+    emailEnabled: boolean;
+    calendarEnabled: boolean;
+  };
   gmail: { account: string };
   calendar: { id: string };
   policy: {
