@@ -196,6 +196,14 @@ gshield currently uses local state files (no external DB required):
 
 For multi-host/high-availability setups, you can replace replay/quota local files with Redis/Postgres later.
 
+## Legal / risk
+
+- License: [`LICENSE`](./LICENSE)
+- Use-at-your-own-risk disclaimer: [`DISCLAIMER.md`](./DISCLAIMER.md)
+- Terms of use: [`TERMS.md`](./TERMS.md)
+
+This project is provided **as-is** with no warranty. You are responsible for secure deployment, compliance, and safe operation.
+
 ## Tests
 
 ```bash
