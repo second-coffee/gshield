@@ -1,6 +1,7 @@
 const AUTH_PATTERNS = [
-  /\b(one[ -]?time\s*(passcode|password|code)|otp|verification\s*code|security\s*code|login\s*code|2fa|two[ -]?factor)\b/i,
-  /\b(password\s*reset|reset\s*your\s*password|sign[- ]?in\s*attempt|confirm\s*it['’]?s\s*you)\b/i
+  /\b(one[ -]?time\s*(passcode|password|code)|otp|verification\s*code|security\s*code|login\s*code|2fa|mfa|two[ -]?factor|authentication\s*code)\b/i,
+  /\b(password\s*reset|reset\s*your\s*password|sign[- ]?in\s*attempt|confirm\s*it['’]?s\s*you|approve\s+sign[- ]?in)\b/i,
+  /\b(magic\s*link|verify\s*(your\s*)?email|passkey|device\s*verification|account\s*verification)\b/i
 ];
 
 export function classifyAuthSensitive(text = ''): boolean {

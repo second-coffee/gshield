@@ -3,42 +3,102 @@ import fs from 'node:fs';
 import path from 'node:path';
 import type { WrapperConfig } from './types.ts';
 
-const REPLAY_FILE = process.env.SECURE_WRAPPER_REPLAY || path.join(process.cwd(), 'logs', 'token-replay.json');
-
 type Claims = { sub: string; iat: number; exp: number; jti: string; aud: string };
+
+const replayState = { lastSweepMs: 0 };
+
+function replayDir(): string {
+  return process.env.SECURE_WRAPPER_REPLAY_DIR || path.join(process.cwd(), 'logs', 'token-replay');
+}
 
 function b64url(input: Buffer | string): string { return Buffer.from(input).toString('base64url'); }
 
-function verify(token: string, key: string): Claims | null {
-  const parts = token.split('.');
-  if (parts.length !== 3) return null;
-  const [h, p, s] = parts;
-  const expected = crypto.createHmac('sha256', key).update(`${h}.${p}`).digest('base64url');
-  if (!crypto.timingSafeEqual(Buffer.from(s), Buffer.from(expected))) return null;
-  const claims = JSON.parse(Buffer.from(p, 'base64url').toString('utf8')) as Claims;
-  const now = Math.floor(Date.now() / 1000);
-  if (!claims.exp || claims.exp < now) return null;
-  if (!claims.iat || claims.iat > now + 10) return null;
-  if (!claims.jti || claims.aud !== 'secure-wrapper') return null;
-  return claims;
+function safeEqualText(left: string, right: string): boolean {
+  const a = Buffer.from(left, 'utf8');
+  const b = Buffer.from(right, 'utf8');
+  if (a.length !== b.length) return false;
+  return crypto.timingSafeEqual(a, b);
 }
 
-function loadReplay(): Record<string, number> {
-  if (!fs.existsSync(REPLAY_FILE)) return {};
-  return JSON.parse(fs.readFileSync(REPLAY_FILE, 'utf8')) as Record<string, number>;
+function isSafeJti(jti: string): boolean {
+  // Accept UUID-like JTIs only (prevents path tricks and unbounded filename abuse).
+  return /^[a-f0-9-]{16,64}$/i.test(jti);
 }
-function saveReplay(state: Record<string, number>) {
-  fs.mkdirSync(path.dirname(REPLAY_FILE), { recursive: true });
-  fs.writeFileSync(REPLAY_FILE, JSON.stringify(state, null, 2));
+
+function verify(token: string, key: string): Claims | null {
+  try {
+    const parts = token.split('.');
+    if (parts.length !== 3) return null;
+    const [h, p, s] = parts;
+    const expected = crypto.createHmac('sha256', key).update(`${h}.${p}`).digest('base64url');
+    if (!safeEqualText(s, expected)) return null;
+    const claims = JSON.parse(Buffer.from(p, 'base64url').toString('utf8')) as Claims;
+    const now = Math.floor(Date.now() / 1000);
+    if (!claims.exp || claims.exp < now) return null;
+    if (!claims.iat || claims.iat > now + 10) return null;
+    if (!claims.jti || claims.aud !== 'secure-wrapper') return null;
+    if (!claims.sub || typeof claims.sub !== 'string') return null;
+    if (!isSafeJti(claims.jti)) return null;
+    return claims;
+  } catch {
+    return null;
+  }
 }
+
+function replayMarker(jti: string): string {
+  return path.join(replayDir(), `${jti}.json`);
+}
+
+function ensureReplayDir() {
+  fs.mkdirSync(replayDir(), { recursive: true });
+}
+
+function sweepExpiredReplayMarkers(nowSec: number) {
+  const nowMs = Date.now();
+  if (nowMs - replayState.lastSweepMs < 60_000) return;
+  replayState.lastSweepMs = nowMs;
+
+  const dir = replayDir();
+  if (!fs.existsSync(dir)) return;
+  const names = fs.readdirSync(dir);
+  for (const name of names) {
+    if (!name.endsWith('.json')) continue;
+    const file = path.join(dir, name);
+    try {
+      const parsed = JSON.parse(fs.readFileSync(file, 'utf8')) as { exp?: number };
+      if (!parsed.exp || parsed.exp < nowSec) fs.rmSync(file, { force: true });
+    } catch {
+      fs.rmSync(file, { force: true });
+    }
+  }
+}
+
 function checkAndMarkReplay(jti: string, exp: number): boolean {
   const now = Math.floor(Date.now() / 1000);
-  const s = loadReplay();
-  Object.entries(s).forEach(([k, v]) => { if (v < now) delete s[k]; });
-  if (s[jti]) return false;
-  s[jti] = exp;
-  saveReplay(s);
-  return true;
+  if (exp < now) return false;
+  ensureReplayDir();
+  sweepExpiredReplayMarkers(now);
+  const marker = replayMarker(jti);
+  try {
+    const fd = fs.openSync(marker, 'wx');
+    fs.writeFileSync(fd, JSON.stringify({ exp }));
+    fs.closeSync(fd);
+    return true;
+  } catch (err: any) {
+    if (err?.code === 'EEXIST') return false;
+    throw err;
+  }
+}
+
+export function sweepReplayNow(): void {
+  ensureReplayDir();
+  sweepExpiredReplayMarkers(Math.floor(Date.now() / 1000));
+}
+
+export function startReplaySweeper(intervalMs = 60_000): NodeJS.Timeout {
+  return setInterval(() => {
+    try { sweepReplayNow(); } catch {}
+  }, intervalMs);
 }
 
 export function issueSignedToken(subject: string, cfg: WrapperConfig): string {
@@ -51,7 +111,7 @@ export function issueSignedToken(subject: string, cfg: WrapperConfig): string {
 
 export function authenticate(headers: Headers, cfg: WrapperConfig): { ok: boolean; principal?: string; reason?: string } {
   const apiKey = headers.get('x-api-key') || headers.get('x-agent-key');
-  if (apiKey && apiKey === cfg.auth.apiKey) return { ok: true, principal: 'api-key' };
+  if (apiKey && safeEqualText(apiKey, cfg.auth.apiKey)) return { ok: true, principal: 'api-key' };
   const auth = headers.get('authorization') || '';
   if (!auth.startsWith('Bearer ')) return { ok: false, reason: 'missing_credentials' };
   const token = auth.slice('Bearer '.length);

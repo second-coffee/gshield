@@ -8,14 +8,14 @@ function arg(name: string, fallback: string | null = null): string | null {
 }
 
 const gmailAccount = arg('--gmail-account');
+const calendarIdsArg = arg('--calendar-ids', null);
 const calendarId = arg('--calendar-id', 'primary')!;
+const calendarIds = (calendarIdsArg ? calendarIdsArg.split(',').map((x) => x.trim()).filter(Boolean) : [calendarId]);
 const port = Number(arg('--port', '8787'));
 const bind = arg('--bind', '127.0.0.1')!;
-const enableEmail = (arg('--enable-email', 'true') || 'true').toLowerCase() !== 'false';
-const enableCalendar = (arg('--enable-calendar', 'true') || 'true').toLowerCase() !== 'false';
 
-if ((enableEmail || enableCalendar) && !gmailAccount) {
-  console.error('Usage: npm run setup -- --gmail-account <account> [--calendar-id primary] [--enable-email true|false] [--enable-calendar true|false] [--port 8787] [--bind 127.0.0.1]');
+if (!gmailAccount) {
+  console.error('Usage: npm run setup -- --gmail-account <account> [--calendar-id primary] [--calendar-ids primary,work,team] [--port 8787] [--bind 127.0.0.1]');
   process.exit(1);
 }
 
@@ -32,16 +32,13 @@ const cfg: WrapperConfig = {
     previousTokenSigningKey: '',
     tokenTtlSeconds: 120
   },
-  features: {
-    emailEnabled: enableEmail,
-    calendarEnabled: enableCalendar
-  },
-  gmail: { account: gmailAccount || '' },
-  calendar: { id: calendarId },
+  gmail: { account: gmailAccount },
+  calendar: { ids: calendarIds },
   policy: {
     email: {
       maxRecentDays: 2,
-      returnSensitiveAuth: false
+      authHandlingMode: 'block',
+      threadContextMode: 'full_thread'
     },
     calendar: {
       defaultThisWeek: true,

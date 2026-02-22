@@ -10,9 +10,28 @@ export function loadConfig(): WrapperConfig {
   if (!fs.existsSync(CONFIG_PATH)) {
     throw new Error(`Missing config at ${CONFIG_PATH}. Run setup.`);
   }
-  const raw = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as WrapperConfig;
-  if (!raw.auth?.apiKey || !raw.auth?.tokenSigningKey) throw new Error('auth config incomplete');
-  return raw;
+  const rawAny = JSON.parse(fs.readFileSync(CONFIG_PATH, 'utf8')) as any;
+
+  // Backward-compatible migration for older configs.
+  const calendarIds = Array.isArray(rawAny?.calendar?.ids)
+    ? rawAny.calendar.ids
+    : (rawAny?.calendar?.id ? [rawAny.calendar.id] : ['primary']);
+
+  const cfg: WrapperConfig = {
+    ...rawAny,
+    calendar: { ids: calendarIds },
+    policy: {
+      ...rawAny.policy,
+      email: {
+        ...rawAny?.policy?.email,
+        authHandlingMode: rawAny?.policy?.email?.authHandlingMode || (rawAny?.policy?.email?.returnSensitiveAuth ? 'warn' : 'block'),
+        threadContextMode: rawAny?.policy?.email?.threadContextMode || 'full_thread'
+      }
+    }
+  };
+
+  if (!cfg.auth?.apiKey || !cfg.auth?.tokenSigningKey) throw new Error('auth config incomplete');
+  return cfg;
 }
 
 export function writeConfig(config: WrapperConfig): void {

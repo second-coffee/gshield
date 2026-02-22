@@ -11,16 +11,13 @@ export type WrapperConfig = {
     previousTokenSigningKey?: string;
     tokenTtlSeconds: number;
   };
-  features: {
-    emailEnabled: boolean;
-    calendarEnabled: boolean;
-  };
   gmail: { account: string };
-  calendar: { id: string };
+  calendar: { ids: string[] };
   policy: {
     email: {
       maxRecentDays: number;
-      returnSensitiveAuth: boolean;
+      authHandlingMode: 'block' | 'warn';
+      threadContextMode: 'full_thread' | 'latest_only';
     };
     calendar: {
       defaultThisWeek: boolean;
@@ -46,4 +43,12 @@ export type EmailItem = {
   snippet?: string;
   body?: string;
   internalDate?: string;
+};
+
+export type CalendarEvent = {
+  id: string;
+  summary?: string;
+  start?: { dateTime?: string; date?: string };
+  end?: { dateTime?: string; date?: string };
+  location?: string;
 };

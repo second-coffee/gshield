@@ -1,3 +1,4 @@
 config/wrapper-config.json
 logs/*.jsonl
+logs/*.json
 node_modules/

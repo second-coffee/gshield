@@ -18,14 +18,16 @@ test('calendar range defaults and clamps', () => {
 test('auth-sensitive detection and redaction', () => {
   const t = 'Your OTP code is 123456. Reset your password here: https://example.com/reset';
   assert.equal(classifyAuthSensitive(t), true);
+  assert.equal(classifyAuthSensitive('Use this magic link to verify your email and approve sign-in'), true);
   const r = redactSecrets(t);
   assert.ok(!r.includes('123456'));
   assert.ok(!r.includes('https://'));
 });
 
-test('recipient allowlists', () => {
-  assert.equal(allowedRecipient('a@b.com', [], []), true);
+test('recipient allowlists fail closed and reject malformed multi-@', () => {
+  assert.equal(allowedRecipient('a@b.com', [], []), false);
   assert.equal(allowedRecipient('a@b.com', ['a@b.com'], []), true);
   assert.equal(allowedRecipient('a@b.com', [], ['b.com']), true);
   assert.equal(allowedRecipient('a@x.com', ['a@b.com'], ['b.com']), false);
+  assert.equal(allowedRecipient('victim@example.com@attacker.com', [], ['example.com']), false);
 });

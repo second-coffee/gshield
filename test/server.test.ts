@@ -1,16 +1,21 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import fs from 'node:fs';
+import path from 'node:path';
 import { buildApp } from '../src/server.ts';
 import { MockProvider } from '../src/provider.ts';
 import type { WrapperConfig } from '../src/types.ts';
+
+const auditFile = path.join('/data/scratch', `gshield-audit-${Date.now()}.jsonl`);
+process.env.SECURE_WRAPPER_AUDIT = auditFile;
 
 const cfg: WrapperConfig = {
   server: { port: 0, bind: '127.0.0.1', maxPayloadBytes: 2048, rateLimitPerMinute: 5 },
   auth: { apiKey: 'k123', tokenSigningKey: 'sign', previousTokenSigningKey: '', tokenTtlSeconds: 3600 },
   gmail: { account: 'acct' },
-  calendar: { id: 'primary' },
+  calendar: { ids: ['primary'] },
   policy: {
-    email: { maxRecentDays: 2, returnSensitiveAuth: false },
+    email: { maxRecentDays: 2, authHandlingMode: 'block', threadContextMode: 'full_thread' },
     calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7 },
     outbound: { replyOnlyDefault: true, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
   }
@@ -32,6 +37,16 @@ test('token mint then replay denied', async () => {
   assert.equal(ok.status, 200);
   const replay = await app.fetch(new Request('http://local/v1/calendar/events', { headers: { authorization: `Bearer ${token}` } }));
   assert.equal(replay.status, 401);
+});
+
+test('malformed json returns 400 invalid_json (not 500)', async () => {
+  const app = buildApp(cfg, new MockProvider());
+  const mint = await app.fetch(new Request('http://local/v1/auth/token', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' }, body: '{bad'
+  }));
+  assert.equal(mint.status, 400);
+  const data = await mint.json() as any;
+  assert.equal(data.error, 'invalid_json');
 });
 
 test('unread filters auth sensitive', async () => {
@@ -58,4 +73,27 @@ test('outbound controls enforced', async () => {
     method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' }, body: JSON.stringify({ threadId: 't1', to: 'bad@example.com', subject: 'x', body: 'y' })
   }));
   assert.equal(deny.status, 403);
+});
+
+test('audit log contains principal', async () => {
+  const app = buildApp(cfg, new MockProvider());
+  fs.rmSync(auditFile, { force: true });
+  const res = await app.fetch(new Request('http://local/v1/email/unread', { headers: { 'x-api-key': 'k123' } }));
+  assert.equal(res.status, 200);
+  const lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n');
+  const row = JSON.parse(lines.at(-1) || '{}');
+  assert.equal(row.principal, 'api-key');
+});
+
+test('provider exception is contained and returned as upstream_failure', async () => {
+  const app = buildApp(cfg, {
+    getUnreadEmails: async () => { throw Object.assign(new Error('boom'), { code: 'GOG_DOWN' }); },
+    getCalendarEvents: async () => [],
+    sendReply: async () => ({ id: 'x' }),
+    sendNew: async () => ({ id: 'y' })
+  });
+  const res = await app.fetch(new Request('http://local/v1/email/unread', { headers: { 'x-api-key': 'k123' } }));
+  assert.equal(res.status, 502);
+  const data = await res.json() as any;
+  assert.equal(data.error, 'upstream_failure');
 });

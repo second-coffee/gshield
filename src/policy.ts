@@ -49,15 +49,29 @@ export function clampCalendarRange(input: {
   return { start, end, min, max };
 }
 
+function normalizeAddress(input: string): string | null {
+  const normalized = input.trim().toLowerCase();
+  if (!normalized || normalized.includes(' ')) return null;
+  const parts = normalized.split('@');
+  if (parts.length !== 2 || !parts[0] || !parts[1]) return null;
+  if (!/^[a-z0-9._%+-]+$/.test(parts[0])) return null;
+  if (!/^[a-z0-9.-]+\.[a-z]{2,}$/.test(parts[1])) return null;
+  return normalized;
+}
+
 export function allowedRecipient(
   to: string,
   allowEmails: string[],
   allowDomains: string[]
 ): boolean {
-  const normalized = to.trim().toLowerCase();
-  const domain = normalized.includes('@') ? normalized.split('@').at(-1)! : '';
-  if (allowEmails.length === 0 && allowDomains.length === 0) return true;
-  if (allowEmails.map((x) => x.toLowerCase()).includes(normalized)) return true;
-  if (allowDomains.map((x) => x.toLowerCase()).includes(domain)) return true;
+  const normalized = normalizeAddress(to);
+  if (!normalized) return false;
+  const domain = normalized.split('@')[1];
+
+  // Security default: fail closed when no allowlist configured.
+  if (allowEmails.length === 0 && allowDomains.length === 0) return false;
+
+  if (allowEmails.map((x) => x.toLowerCase().trim()).includes(normalized)) return true;
+  if (allowDomains.map((x) => x.toLowerCase().trim()).includes(domain)) return true;
   return false;
 }
