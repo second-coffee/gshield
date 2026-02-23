@@ -29,6 +29,7 @@ export type WrapperConfig = {
     };
     outbound: {
       replyOnlyDefault: boolean;
+      allowAllRecipients: boolean;
       recipientAllowlist: string[];
       domainAllowlist: string[];
       maxSendsPerHour: number;

@@ -211,7 +211,7 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
     const body = await parseJsonLimited(c, cfg.server.maxPayloadBytes);
     if (!body.ok) return asErr(c, body.error === 'payload_too_large' ? 413 : 400, body.error);
     if (!body.body.threadId || !body.body.to || !body.body.subject || !body.body.body) return asErr(c, 400, 'missing_fields');
-    if (!allowedRecipient(body.body.to, cfg.policy.outbound.recipientAllowlist, cfg.policy.outbound.domainAllowlist)) return asErr(c, 403, 'recipient_not_allowed');
+    if (!allowedRecipient(body.body.to, cfg.policy.outbound.recipientAllowlist, cfg.policy.outbound.domainAllowlist, cfg.policy.outbound.allowAllRecipients)) return asErr(c, 403, 'recipient_not_allowed');
     const lim = consumeSendQuota(cfg.policy.outbound.maxSendsPerHour, cfg.policy.outbound.maxSendsPerDay);
     if (!lim.ok) return asErr(c, 429, lim.reason || 'rate_limited');
     const result = await p.sendReply({ threadId: body.body.threadId, to: body.body.to, subject: body.body.subject, body: body.body.body });
@@ -224,7 +224,7 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
     const body = await parseJsonLimited(c, cfg.server.maxPayloadBytes);
     if (!body.ok) return asErr(c, body.error === 'payload_too_large' ? 413 : 400, body.error);
     if (!body.body.to || !body.body.subject || !body.body.body) return asErr(c, 400, 'missing_fields');
-    if (!allowedRecipient(body.body.to, cfg.policy.outbound.recipientAllowlist, cfg.policy.outbound.domainAllowlist)) return asErr(c, 403, 'recipient_not_allowed');
+    if (!allowedRecipient(body.body.to, cfg.policy.outbound.recipientAllowlist, cfg.policy.outbound.domainAllowlist, cfg.policy.outbound.allowAllRecipients)) return asErr(c, 403, 'recipient_not_allowed');
     const lim = consumeSendQuota(cfg.policy.outbound.maxSendsPerHour, cfg.policy.outbound.maxSendsPerDay);
     if (!lim.ok) return asErr(c, 429, lim.reason || 'rate_limited');
     const result = await p.sendNew({ to: body.body.to, subject: body.body.subject, body: body.body.body });

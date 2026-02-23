@@ -177,64 +177,56 @@ Blocked when `policy.outbound.replyOnlyDefault=true`.
 
 The config lives at `config/wrapper-config.json` (or the path in `$SECURE_WRAPPER_CONFIG`). `npm run setup` generates it with safe defaults. Edit the file directly to change any setting — restart gshield to apply.
 
-### `server`
+### Setup parameters
+
+These wire gshield to your Google account and control how it listens.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `port` | `8787` | Port to listen on |
-| `bind` | `127.0.0.1` | Interface to bind. Keep this as loopback unless you're behind a reverse proxy |
-| `maxPayloadBytes` | `32768` | Max request body size in bytes. Requests over this limit get `413` |
-| `rateLimitPerMinute` | `60` | Max requests per principal per minute. Exceeding returns `429` |
+| `gmail.account` | *(required)* | Gmail address `gog` is authorized for |
+| `calendar.ids` | `["primary"]` | Calendar IDs to query. Find a calendar's ID in Google Calendar settings. Agents can request a subset but cannot go outside this list |
+| `server.port` | `8787` | Port to listen on |
+| `server.bind` | `127.0.0.1` | Interface to bind. Keep as loopback unless behind a reverse proxy |
+| `server.maxPayloadBytes` | `32768` | Max request body size in bytes. Requests over this limit get `413` |
+| `server.rateLimitPerMinute` | `60` | Max requests per principal per minute before returning `429` |
+| `auth.apiKey` | *(generated)* | Static secret the agent sends as `x-api-key`. Treat like a password |
+| `auth.tokenSigningKey` | *(generated)* | HMAC key used to sign bearer tokens. Never share this |
+| `auth.previousTokenSigningKey` | `""` | Previous signing key, kept during key rotation so in-flight tokens still verify |
+| `auth.tokenTtlSeconds` | `120` | How long a minted bearer token is valid. Tokens are also single-use |
 
-### `auth`
+### Restriction parameters
 
-| Key | Default | Description |
-|-----|---------|-------------|
-| `apiKey` | *(generated)* | Static secret the agent includes as `x-api-key`. Treat like a password |
-| `tokenSigningKey` | *(generated)* | HMAC key used to sign bearer tokens. Never share this |
-| `previousTokenSigningKey` | `""` | Old signing key kept during rotation so in-flight tokens still verify |
-| `tokenTtlSeconds` | `120` | How long a minted bearer token is valid. Tokens are also single-use |
+These control what the agent is allowed to read and send.
 
-### `gmail`
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `account` | *(required)* | Gmail address `gog` is authorized for |
-
-### `calendar`
+#### Email
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `ids` | `["primary"]` | Calendar IDs to query by default. Use Google Calendar's calendar ID (visible in calendar settings). Agents can request a subset of these but cannot request calendars outside this list |
+| `policy.email.maxRecentDays` | `2` | Max days of unread email the agent can request. Requests for more are silently clamped |
+| `policy.email.authHandlingMode` | `"block"` | How to handle emails that look like OTPs, login codes, 2FA prompts, or password resets. `block` withholds them entirely; `warn` passes them through with a `warnings[]` field |
+| `policy.email.threadContextMode` | `"full_thread"` | `full_thread` returns the full message body. `latest_only` strips quoted reply content, showing only the newest message in a thread |
 
-### `policy.email`
-
-| Key | Default | Description |
-|-----|---------|-------------|
-| `maxRecentDays` | `2` | Agent can request at most this many days of unread email. Requests for more are silently clamped |
-| `authHandlingMode` | `"block"` | What to do with emails that look like OTPs, login codes, 2FA prompts, or password resets. `block` withholds them entirely; `warn` passes them through with a `warnings[]` field in the response |
-| `threadContextMode` | `"full_thread"` | `full_thread` returns full message body and snippet. `latest_only` strips quoted reply text, showing only the most recent content |
-
-### `policy.calendar`
+#### Calendar
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `defaultThisWeek` | `true` | When the agent omits `start`/`end`, use the current week as the range |
-| `maxPastDays` | `0` | How far back the agent can query. `0` means no past events; increase to allow historical lookback |
-| `maxFutureDays` | `7` | How far ahead the agent can query. Requests beyond this are clamped |
-| `allowAttendeeEmails` | `true` | Include attendee names, emails, and RSVP status in event responses |
-| `allowLocation` | `false` | Include the event location field (can contain physical addresses or room names) |
-| `allowMeetingUrls` | `false` | Include Google Meet `hangoutLink` in event responses |
+| `policy.calendar.defaultThisWeek` | `true` | When the agent omits `start`/`end`, default to the current week |
+| `policy.calendar.maxPastDays` | `0` | How far back the agent can query. `0` means current and future only |
+| `policy.calendar.maxFutureDays` | `7` | How far ahead the agent can query. Requests beyond this are clamped |
+| `policy.calendar.allowAttendeeEmails` | `true` | Include attendee names, emails, and RSVP status in responses |
+| `policy.calendar.allowLocation` | `false` | Include the event location field (may contain physical addresses or room names) |
+| `policy.calendar.allowMeetingUrls` | `false` | Include Google Meet links (`hangoutLink`) in responses |
 
-### `policy.outbound`
+#### Outbound email
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `replyOnlyDefault` | `true` | When `true`, the `POST /v1/email/send` route (new emails) returns `403`. Only replies are allowed |
-| `recipientAllowlist` | `[]` | Exact email addresses the agent is allowed to send to |
-| `domainAllowlist` | `[]` | Domains the agent is allowed to send to (e.g. `"example.com"` covers all addresses at that domain) |
-| `maxSendsPerHour` | `5` | Rolling hourly send cap across all outbound routes |
-| `maxSendsPerDay` | `25` | Rolling daily send cap across all outbound routes |
+| `policy.outbound.replyOnlyDefault` | `true` | When `true`, new emails (`POST /v1/email/send`) are blocked with `403`. Only replies to existing threads are allowed |
+| `policy.outbound.allowAllRecipients` | `false` | When `true`, the agent can send to any email address. When `false`, recipients must be on the allowlist below. **Only enable this if you trust the agent fully** |
+| `policy.outbound.recipientAllowlist` | `[]` | Exact email addresses the agent is allowed to send to |
+| `policy.outbound.domainAllowlist` | `[]` | Domains the agent is allowed to send to (e.g. `"example.com"` permits any address at that domain) |
+| `policy.outbound.maxSendsPerHour` | `5` | Rolling hourly send cap across all outbound routes |
+| `policy.outbound.maxSendsPerDay` | `25` | Rolling daily send cap across all outbound routes |
 
 ## Non-root Linux/macOS deployment
 

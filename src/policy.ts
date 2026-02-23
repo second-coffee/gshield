@@ -62,10 +62,12 @@ function normalizeAddress(input: string): string | null {
 export function allowedRecipient(
   to: string,
   allowEmails: string[],
-  allowDomains: string[]
+  allowDomains: string[],
+  allowAll = false
 ): boolean {
   const normalized = normalizeAddress(to);
   if (!normalized) return false;
+  if (allowAll) return true;
   const domain = normalized.split('@')[1];
 
   // Security default: fail closed when no allowlist configured.

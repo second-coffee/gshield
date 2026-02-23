@@ -32,6 +32,10 @@ export function loadConfig(): WrapperConfig {
         allowAttendeeEmails: rawAny?.policy?.calendar?.allowAttendeeEmails ?? true,
         allowLocation: rawAny?.policy?.calendar?.allowLocation ?? false,
         allowMeetingUrls: rawAny?.policy?.calendar?.allowMeetingUrls ?? false,
+      },
+      outbound: {
+        ...rawAny?.policy?.outbound,
+        allowAllRecipients: rawAny?.policy?.outbound?.allowAllRecipients ?? false,
       }
     }
   };
