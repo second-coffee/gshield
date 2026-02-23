@@ -1,6 +1,61 @@
-# Secure Wrapper Service (TypeScript + Hono)
+# gshield
 
-Production-focused restricted Gmail + Google Calendar wrapper for agent callers.
+gshield is a security proxy that sits between an AI agent and your Google account. Instead of giving the agent direct OAuth access to Gmail and Calendar, the agent talks to gshield — and gshield enforces exactly what it can read, what it can send, and who it can contact.
+
+## Why this exists
+
+Giving an AI agent raw OAuth access to your Gmail is like handing it a master key. It can read everything, send to anyone, and you have no visibility into what it did. gshield solves this by acting as a controlled gateway:
+
+- The agent never touches Google credentials directly
+- Every request is logged with who made it and what they got
+- Security-sensitive emails (OTPs, 2FA codes, password resets) are blocked before the agent ever sees them
+- Outbound email requires recipients to be on an allowlist
+- All time ranges, rate limits, and payload sizes are hard-capped by config
+
+## What gshield can access
+
+gshield uses a Google account authorized via [`gog`](https://github.com/openclaw/gog), which handles OAuth. The permissions required depend on which surfaces you enable:
+
+| Surface | Google permission needed |
+|---------|--------------------------|
+| Read unread email | `gmail.readonly` |
+| Send replies | `gmail.send` |
+| Read calendar events | `calendar.readonly` |
+
+**The agent never sees these credentials.** It only receives a short-lived signed token (default 2 minutes) issued by gshield in exchange for an API key.
+
+## What agents can and can't do
+
+### Email
+- **Can read**: unread messages within the configured lookback window (default: 2 days)
+- **Cannot read**: emails containing OTP codes, login links, 2FA prompts, or password reset flows — these are blocked entirely by default
+- **Can send**: replies and new messages to addresses on the recipient or domain allowlist
+- **Cannot send**: to anyone not on the allowlist; cannot exceed hourly or daily send caps
+
+### Calendar
+- **Can read**: events within the configured time window (default: this week)
+- **Location, attendee emails, and meeting URLs** are each off by default — you opt in per field in config
+
+### Everything else
+- All other routes return `404`. There is no route an agent can discover that isn't explicitly defined.
+
+## How a request flows
+
+```
+Agent
+  │  API key or short-lived bearer token
+  ▼
+gshield
+  ├─ authenticates the caller
+  ├─ checks rate limit
+  ├─ clamps time ranges to policy bounds
+  ├─ calls Google via gog
+  ├─ filters/redacts response per policy
+  ├─ writes audit log entry
+  └─ returns sanitized JSON
+```
+
+All audit entries are appended to `logs/audit.jsonl` and include the principal, action, parameters, and result count.
 
 ## Security controls implemented
 
@@ -20,15 +75,69 @@ Production-focused restricted Gmail + Google Calendar wrapper for agent callers.
 - **Rate limits**: per-principal request cap per minute
 - **Audit log**: append-only JSONL at `logs/audit.jsonl`
 
-## One-time setup
+## Getting started
+
+### 1. Install dependencies
 
 ```bash
-cd /home/moltbot/work/secure-wrapper-service
 npm install
-npm run setup -- --gmail-account iamsidekickcaleb@gmail.com --calendar-ids primary,work --port 8787 --bind 127.0.0.1
 ```
 
-Creates `config/wrapper-config.json` with default locked policy.
+### 2. Authorize Google access
+
+gshield uses [`gog`](https://github.com/openclaw/gog) to talk to Google. Install it and authorize the account you want the agent to use:
+
+```bash
+gog auth --account you@gmail.com
+```
+
+This stores OAuth tokens locally for `gog` to use. gshield never touches them directly.
+
+### 3. Generate config
+
+```bash
+npm run setup -- --gmail-account you@gmail.com --calendar-ids primary --port 8787 --bind 127.0.0.1
+```
+
+This creates `config/wrapper-config.json` with safe defaults:
+- Email lookback: 2 days
+- Calendar window: this week only
+- Outbound: reply-only, no send allowlist (you add recipients manually)
+- Auth-sensitive emails: blocked
+- Calendar location / attendees / meeting URLs: off
+
+The API key printed to stdout is what the agent uses. Store it somewhere safe (password manager, secret manager). It won't be shown again but is readable in the config file (`0600` permissions).
+
+To enable multiple calendars:
+```bash
+npm run setup -- --gmail-account you@gmail.com --calendar-ids primary,work,team@example.com
+```
+
+### 4. Start gshield
+
+```bash
+npm start
+```
+
+gshield listens on `127.0.0.1:8787` by default — local only, not exposed to the internet.
+
+### 5. Connect your agent
+
+Have the agent mint a short-lived token before making requests:
+
+```bash
+# Mint a token (valid for 2 minutes by default)
+curl -s -X POST http://localhost:8787/v1/auth/token \
+  -H "x-api-key: YOUR_API_KEY" \
+  -H "content-type: application/json" \
+  -d '{"sub":"my-agent"}' | jq .token
+
+# Use it
+curl -s http://localhost:8787/v1/email/unread \
+  -H "authorization: Bearer TOKEN"
+```
+
+Each token is single-use. The agent should mint a fresh one per request, or per session.
 
 ## Run
 
