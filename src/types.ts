@@ -23,6 +23,9 @@ export type WrapperConfig = {
       defaultThisWeek: boolean;
       maxPastDays: number;
       maxFutureDays: number;
+      allowAttendeeEmails: boolean;
+      allowLocation: boolean;
+      allowMeetingUrls: boolean;
     };
     outbound: {
       replyOnlyDefault: boolean;
@@ -51,4 +54,6 @@ export type CalendarEvent = {
   start?: { dateTime?: string; date?: string };
   end?: { dateTime?: string; date?: string };
   location?: string;
+  hangoutLink?: string;
+  attendees?: Array<{ email?: string; displayName?: string; self?: boolean; responseStatus?: string }>;
 };

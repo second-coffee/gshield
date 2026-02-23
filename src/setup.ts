@@ -43,7 +43,10 @@ const cfg: WrapperConfig = {
     calendar: {
       defaultThisWeek: true,
       maxPastDays: 0,
-      maxFutureDays: 7
+      maxFutureDays: 7,
+      allowAttendeeEmails: true,
+      allowLocation: false,
+      allowMeetingUrls: false,
     },
     outbound: {
       replyOnlyDefault: true,

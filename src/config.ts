@@ -26,6 +26,12 @@ export function loadConfig(): WrapperConfig {
         ...rawAny?.policy?.email,
         authHandlingMode: rawAny?.policy?.email?.authHandlingMode || (rawAny?.policy?.email?.returnSensitiveAuth ? 'warn' : 'block'),
         threadContextMode: rawAny?.policy?.email?.threadContextMode || 'full_thread'
+      },
+      calendar: {
+        ...rawAny?.policy?.calendar,
+        allowAttendeeEmails: rawAny?.policy?.calendar?.allowAttendeeEmails ?? true,
+        allowLocation: rawAny?.policy?.calendar?.allowLocation ?? false,
+        allowMeetingUrls: rawAny?.policy?.calendar?.allowMeetingUrls ?? false,
       }
     }
   };

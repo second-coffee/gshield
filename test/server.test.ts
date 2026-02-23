@@ -1,13 +1,15 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { buildApp } from '../src/server.ts';
 import { MockProvider } from '../src/provider.ts';
 import type { WrapperConfig } from '../src/types.ts';
 
-const auditFile = path.join('/data/scratch', `gshield-audit-${Date.now()}.jsonl`);
+const auditFile = path.join(os.tmpdir(), `gshield-audit-${Date.now()}.jsonl`);
 process.env.SECURE_WRAPPER_AUDIT = auditFile;
+process.env.SECURE_WRAPPER_REPLAY_DIR = path.join(os.tmpdir(), 'gshield-replay-test');
 
 const cfg: WrapperConfig = {
   server: { port: 0, bind: '127.0.0.1', maxPayloadBytes: 2048, rateLimitPerMinute: 5 },
@@ -16,7 +18,7 @@ const cfg: WrapperConfig = {
   calendar: { ids: ['primary'] },
   policy: {
     email: { maxRecentDays: 2, authHandlingMode: 'block', threadContextMode: 'full_thread' },
-    calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7 },
+    calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7, allowAttendeeEmails: true, allowLocation: false, allowMeetingUrls: false },
     outbound: { replyOnlyDefault: true, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
   }
 };
@@ -96,4 +98,48 @@ test('provider exception is contained and returned as upstream_failure', async (
   assert.equal(res.status, 502);
   const data = await res.json() as any;
   assert.equal(data.error, 'upstream_failure');
+});
+
+test('calendar privacy: location and meetingUrls hidden, attendees shown by default', async () => {
+  const cfgWith: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 } };
+  const provider = new MockProvider({ events: [
+    { id: 'e1', summary: 'Standup', location: '123 Main St', hangoutLink: 'https://meet.google.com/abc', attendees: [{ email: 'alice@example.com', self: true, responseStatus: 'accepted' }] }
+  ] });
+  const app = buildApp(cfgWith, provider);
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', { headers: { 'x-api-key': 'k123' } }));
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  const item = data.items[0];
+  assert.equal('location' in item, false);
+  assert.equal('hangoutLink' in item, false);
+  assert.ok(Array.isArray(item.attendees));
+  assert.equal(item.attendees[0].email, 'alice@example.com');
+});
+
+test('calendar privacy: fields exposed when flags enabled', async () => {
+  const cfgWith: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendar: { ...cfg.policy.calendar, allowLocation: true, allowMeetingUrls: true, allowAttendeeEmails: true } } };
+  const provider = new MockProvider({ events: [
+    { id: 'e1', summary: 'Standup', location: '123 Main St', hangoutLink: 'https://meet.google.com/abc', attendees: [{ email: 'alice@example.com' }] }
+  ] });
+  const app = buildApp(cfgWith, provider);
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', { headers: { 'x-api-key': 'k123' } }));
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  const item = data.items[0];
+  assert.equal(item.location, '123 Main St');
+  assert.equal(item.hangoutLink, 'https://meet.google.com/abc');
+  assert.ok(Array.isArray(item.attendees));
+});
+
+test('calendar privacy: attendees absent when allowAttendeeEmails false', async () => {
+  const cfgWith: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendar: { ...cfg.policy.calendar, allowAttendeeEmails: false } } };
+  const provider = new MockProvider({ events: [
+    { id: 'e1', summary: 'Standup', attendees: [{ email: 'alice@example.com' }] }
+  ] });
+  const app = buildApp(cfgWith, provider);
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', { headers: { 'x-api-key': 'k123' } }));
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  const item = data.items[0];
+  assert.equal('attendees' in item, false);
 });

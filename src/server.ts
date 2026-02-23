@@ -182,8 +182,28 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
     const range = clampCalendarRange({ start: c.req.query('start'), end: c.req.query('end'), maxPastDays: cfg.policy.calendar.maxPastDays, maxFutureDays: cfg.policy.calendar.maxFutureDays, defaultThisWeek: cfg.policy.calendar.defaultThisWeek });
     const calendarIds = parseCalendarIds(c.req.query('calendars'), cfg.calendar.ids);
     const raw = await p.getCalendarEvents(range.start.toISOString(), range.end.toISOString(), calendarIds);
-    const items = raw.map((e) => ({ id: e.id, summary: e.summary || '', start: e.start?.dateTime || e.start?.date || null, end: e.end?.dateTime || e.end?.date || null, location: e.location || '' }));
-    audit(c, { action: 'calendar_events', start: range.start.toISOString(), end: range.end.toISOString(), calendars: calendarIds, count: items.length });
+    const calPol = cfg.policy.calendar;
+    const items = raw.map((e) => ({
+      id: e.id,
+      summary: e.summary || '',
+      start: e.start?.dateTime || e.start?.date || null,
+      end: e.end?.dateTime || e.end?.date || null,
+      ...(calPol.allowLocation && e.location ? { location: e.location } : {}),
+      ...(calPol.allowMeetingUrls && e.hangoutLink ? { hangoutLink: e.hangoutLink } : {}),
+      ...(calPol.allowAttendeeEmails && e.attendees?.length
+        ? { attendees: e.attendees.map((a) => ({ email: a.email, displayName: a.displayName, self: a.self, responseStatus: a.responseStatus })) }
+        : {}),
+    }));
+    audit(c, {
+      action: 'calendar_events',
+      start: range.start.toISOString(),
+      end: range.end.toISOString(),
+      calendars: calendarIds,
+      count: items.length,
+      allowAttendeeEmails: calPol.allowAttendeeEmails,
+      allowLocation: calPol.allowLocation,
+      allowMeetingUrls: calPol.allowMeetingUrls,
+    });
     return c.json({ start: range.start.toISOString(), end: range.end.toISOString(), calendars: calendarIds, count: items.length, items });
   });
 

@@ -1,12 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import fs from 'node:fs';
+import os from 'node:os';
 import path from 'node:path';
 import { authenticate, issueSignedToken } from '../src/auth.ts';
 import crypto from 'node:crypto';
 import type { WrapperConfig } from '../src/types.ts';
 
-const replayDir = path.join('/data/scratch', `gshield-auth-${Date.now()}`);
+const replayDir = path.join(os.tmpdir(), `gshield-auth-${Date.now()}`);
 process.env.SECURE_WRAPPER_REPLAY_DIR = replayDir;
 
 const cfg: WrapperConfig = {
@@ -16,7 +17,7 @@ const cfg: WrapperConfig = {
   calendar: { ids: ['primary'] },
   policy: {
     email: { maxRecentDays: 2, authHandlingMode: 'block', threadContextMode: 'full_thread' },
-    calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7 },
+    calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7, allowAttendeeEmails: true, allowLocation: false, allowMeetingUrls: false },
     outbound: { replyOnlyDefault: true, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
   }
 };
