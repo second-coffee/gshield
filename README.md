@@ -139,12 +139,6 @@ curl -s http://localhost:8787/v1/email/unread \
 
 Each token is single-use. The agent should mint a fresh one per request, or per session.
 
-## Run
-
-```bash
-npm start
-```
-
 ## API
 
 ### `GET /healthz`
@@ -179,15 +173,68 @@ Allowed by default subject to allowlist + send caps.
 ### `POST /v1/email/send`
 Blocked when `policy.outbound.replyOnlyDefault=true`.
 
-## Config highlights
+## Configuration reference
 
-- `auth.apiKey`: static secret for low-friction auth
-- `auth.tokenSigningKey`: local-only signing secret
-- `auth.tokenTtlSeconds`: short token lifetime (default 120)
-- `calendar.ids`: default calendars to aggregate
-- `policy.email.authHandlingMode`: `block` or `warn`
-- `policy.email.threadContextMode`: `full_thread` or `latest_only`
-- `policy.outbound.recipientAllowlist` + `domainAllowlist`
+The config lives at `config/wrapper-config.json` (or the path in `$SECURE_WRAPPER_CONFIG`). `npm run setup` generates it with safe defaults. Edit the file directly to change any setting — restart gshield to apply.
+
+### `server`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `port` | `8787` | Port to listen on |
+| `bind` | `127.0.0.1` | Interface to bind. Keep this as loopback unless you're behind a reverse proxy |
+| `maxPayloadBytes` | `32768` | Max request body size in bytes. Requests over this limit get `413` |
+| `rateLimitPerMinute` | `60` | Max requests per principal per minute. Exceeding returns `429` |
+
+### `auth`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `apiKey` | *(generated)* | Static secret the agent includes as `x-api-key`. Treat like a password |
+| `tokenSigningKey` | *(generated)* | HMAC key used to sign bearer tokens. Never share this |
+| `previousTokenSigningKey` | `""` | Old signing key kept during rotation so in-flight tokens still verify |
+| `tokenTtlSeconds` | `120` | How long a minted bearer token is valid. Tokens are also single-use |
+
+### `gmail`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `account` | *(required)* | Gmail address `gog` is authorized for |
+
+### `calendar`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `ids` | `["primary"]` | Calendar IDs to query by default. Use Google Calendar's calendar ID (visible in calendar settings). Agents can request a subset of these but cannot request calendars outside this list |
+
+### `policy.email`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `maxRecentDays` | `2` | Agent can request at most this many days of unread email. Requests for more are silently clamped |
+| `authHandlingMode` | `"block"` | What to do with emails that look like OTPs, login codes, 2FA prompts, or password resets. `block` withholds them entirely; `warn` passes them through with a `warnings[]` field in the response |
+| `threadContextMode` | `"full_thread"` | `full_thread` returns full message body and snippet. `latest_only` strips quoted reply text, showing only the most recent content |
+
+### `policy.calendar`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `defaultThisWeek` | `true` | When the agent omits `start`/`end`, use the current week as the range |
+| `maxPastDays` | `0` | How far back the agent can query. `0` means no past events; increase to allow historical lookback |
+| `maxFutureDays` | `7` | How far ahead the agent can query. Requests beyond this are clamped |
+| `allowAttendeeEmails` | `true` | Include attendee names, emails, and RSVP status in event responses |
+| `allowLocation` | `false` | Include the event location field (can contain physical addresses or room names) |
+| `allowMeetingUrls` | `false` | Include Google Meet `hangoutLink` in event responses |
+
+### `policy.outbound`
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `replyOnlyDefault` | `true` | When `true`, the `POST /v1/email/send` route (new emails) returns `403`. Only replies are allowed |
+| `recipientAllowlist` | `[]` | Exact email addresses the agent is allowed to send to |
+| `domainAllowlist` | `[]` | Domains the agent is allowed to send to (e.g. `"example.com"` covers all addresses at that domain) |
+| `maxSendsPerHour` | `5` | Rolling hourly send cap across all outbound routes |
+| `maxSendsPerDay` | `25` | Rolling daily send cap across all outbound routes |
 
 ## Non-root Linux/macOS deployment
 
