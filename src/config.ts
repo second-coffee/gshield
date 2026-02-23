@@ -36,6 +36,7 @@ export function loadConfig(): WrapperConfig {
       outbound: {
         ...rawAny?.policy?.outbound,
         allowAllRecipients: rawAny?.policy?.outbound?.allowAllRecipients ?? false,
+        allowReplyToAnyone: rawAny?.policy?.outbound?.allowReplyToAnyone ?? true,
       }
     }
   };

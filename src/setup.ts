@@ -51,6 +51,7 @@ const cfg: WrapperConfig = {
     outbound: {
       replyOnlyDefault: true,
       allowAllRecipients: false,
+      allowReplyToAnyone: true,
       recipientAllowlist: [],
       domainAllowlist: [],
       maxSendsPerHour: 5,

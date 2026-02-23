@@ -12,14 +12,14 @@ process.env.SECURE_WRAPPER_AUDIT = auditFile;
 process.env.SECURE_WRAPPER_REPLAY_DIR = path.join(os.tmpdir(), 'gshield-replay-test');
 
 const cfg: WrapperConfig = {
-  server: { port: 0, bind: '127.0.0.1', maxPayloadBytes: 2048, rateLimitPerMinute: 5 },
+  server: { port: 0, bind: '127.0.0.1', maxPayloadBytes: 2048, rateLimitPerMinute: 30 },
   auth: { apiKey: 'k123', tokenSigningKey: 'sign', previousTokenSigningKey: '', tokenTtlSeconds: 3600 },
   gmail: { account: 'acct' },
   calendar: { ids: ['primary'] },
   policy: {
     email: { maxRecentDays: 2, authHandlingMode: 'block', threadContextMode: 'full_thread' },
     calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7, allowAttendeeEmails: true, allowLocation: false, allowMeetingUrls: false },
-    outbound: { replyOnlyDefault: true, allowAllRecipients: false, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
+    outbound: { replyOnlyDefault: true, allowAllRecipients: false, allowReplyToAnyone: true, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
   }
 };
 
@@ -66,15 +66,26 @@ test('unread filters auth sensitive', async () => {
 
 test('outbound controls enforced', async () => {
   const app = buildApp(cfg, new MockProvider());
+
+  // replyOnlyDefault blocks new sends
   const send = await app.fetch(new Request('http://local/v1/email/send', {
     method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' }, body: JSON.stringify({ to: 'ok@example.com', subject: 'x', body: 'y' })
   }));
   assert.equal(send.status, 403);
 
-  const deny = await app.fetch(new Request('http://local/v1/email/reply', {
+  // allowReplyToAnyone:true (default) lets replies bypass the allowlist
+  const replyAllowed = await app.fetch(new Request('http://local/v1/email/reply', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' }, body: JSON.stringify({ threadId: 't1', to: 'anyone@example.com', subject: 'x', body: 'y' })
+  }));
+  assert.equal(replyAllowed.status, 200);
+
+  // allowReplyToAnyone:false enforces the allowlist for replies too
+  const strictCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, outbound: { ...cfg.policy.outbound, allowReplyToAnyone: false } } };
+  const strictApp = buildApp(strictCfg, new MockProvider());
+  const replyDenied = await strictApp.fetch(new Request('http://local/v1/email/reply', {
     method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' }, body: JSON.stringify({ threadId: 't1', to: 'bad@example.com', subject: 'x', body: 'y' })
   }));
-  assert.equal(deny.status, 403);
+  assert.equal(replyDenied.status, 403);
 });
 
 test('audit log contains principal', async () => {

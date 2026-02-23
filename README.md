@@ -4,13 +4,15 @@ gshield is a security proxy that sits between an AI agent and your Google accoun
 
 ## Why this exists
 
-Giving an AI agent raw OAuth access to your Gmail is like handing it a master key. It can read everything, send to anyone, and you have no visibility into what it did. gshield solves this by acting as a controlled gateway:
+Giving an AI agent raw OAuth access to your Gmail is like handing it a master key. If anything goes wrong — a compromised agent, a bad prompt injection, a malicious MCP tool — an attacker can read every email you've ever received going back years or decades. They can see every calendar event you've ever had, every location you've ever been, every meeting attendee, every address. They can contact anyone in your history. And they can do all of this silently, while you're asleep.
+
+gshield limits the blast radius. Instead of raw OAuth, the agent gets a narrow API with only what it needs right now:
 
 - The agent never touches Google credentials directly
 - Every request is logged with who made it and what they got
 - Security-sensitive emails (OTPs, 2FA codes, password resets) are blocked before the agent ever sees them
-- Outbound email requires recipients to be on an allowlist
-- All time ranges, rate limits, and payload sizes are hard-capped by config
+- Outbound email is restricted — replies only by default, with optional throttling and recipient controls
+- All time windows, rate limits, and payload sizes are hard-capped by config
 
 ## What gshield can access
 
@@ -29,8 +31,11 @@ gshield uses a Google account authorized via [`gog`](https://github.com/openclaw
 ### Email
 - **Can read**: unread messages within the configured lookback window (default: 2 days)
 - **Cannot read**: emails containing OTP codes, login links, 2FA prompts, or password reset flows — these are blocked entirely by default
-- **Can send**: replies and new messages to addresses on the recipient or domain allowlist
-- **Cannot send**: to anyone not on the allowlist; cannot exceed hourly or daily send caps
+- **Outbound** is controlled by three escalating trust levels:
+  - **Replies only** (`replyOnlyDefault: true`, default) — the agent can only respond to existing threads, never initiate contact
+  - **Restricted** (`replyOnlyDefault: false`) — the agent can also send new emails, but only to specific addresses or domains you list. Replies to anyone who has already emailed you are always allowed regardless of the allowlist, since you're responding to someone who contacted you first — not cold-emailing strangers
+  - **Unrestricted** (`allowAllRecipients: true`) — the agent can send to anyone; only use this if you fully trust it
+- **Throttled**: hourly and daily send caps apply at all levels
 
 ### Calendar
 - **Can read**: events within the configured time window (default: this week)
@@ -221,12 +226,13 @@ These control what the agent is allowed to read and send.
 
 | Key | Default | Description |
 |-----|---------|-------------|
-| `policy.outbound.replyOnlyDefault` | `true` | When `true`, new emails (`POST /v1/email/send`) are blocked with `403`. Only replies to existing threads are allowed |
-| `policy.outbound.allowAllRecipients` | `false` | When `true`, the agent can send to any email address. When `false`, recipients must be on the allowlist below. **Only enable this if you trust the agent fully** |
-| `policy.outbound.recipientAllowlist` | `[]` | Exact email addresses the agent is allowed to send to |
-| `policy.outbound.domainAllowlist` | `[]` | Domains the agent is allowed to send to (e.g. `"example.com"` permits any address at that domain) |
-| `policy.outbound.maxSendsPerHour` | `5` | Rolling hourly send cap across all outbound routes |
-| `policy.outbound.maxSendsPerDay` | `25` | Rolling daily send cap across all outbound routes |
+| `policy.outbound.replyOnlyDefault` | `true` | When `true`, new emails (`POST /v1/email/send`) are blocked with `403`. The agent can only reply to existing threads |
+| `policy.outbound.allowReplyToAnyone` | `true` | When `true`, replies bypass the allowlist entirely — the agent can reply to anyone who has emailed you. When `false`, even replies must match the allowlist |
+| `policy.outbound.allowAllRecipients` | `false` | When `true`, new sends go to any address with no allowlist check. **Only enable if you fully trust the agent** |
+| `policy.outbound.recipientAllowlist` | `[]` | Exact email addresses the agent is allowed to send new emails to (replies are unaffected when `allowReplyToAnyone` is `true`) |
+| `policy.outbound.domainAllowlist` | `[]` | Domains the agent is allowed to send new emails to, e.g. `"example.com"` covers any address at that domain |
+| `policy.outbound.maxSendsPerHour` | `5` | Rolling hourly send cap. Applies to all outbound routes at all trust levels |
+| `policy.outbound.maxSendsPerDay` | `25` | Rolling daily send cap. Applies to all outbound routes at all trust levels |
 
 ## Non-root Linux/macOS deployment
 
