@@ -27,6 +27,14 @@ export type WrapperConfig = {
       allowLocation: boolean;
       allowMeetingUrls: boolean;
     };
+    calendarWrite: {
+      enabled: boolean;
+      allowedCalendarIds: string[];
+      allowAttendees: boolean;
+      sendUpdates: 'none' | 'all' | 'externalOnly';
+      maxEventsPerHour: number;
+      maxEventsPerDay: number;
+    };
     outbound: {
       replyOnlyDefault: boolean;
       allowAllRecipients: boolean;

@@ -16,13 +16,14 @@ gshield limits the blast radius. Instead of raw OAuth, the agent gets a narrow A
 
 ## What gshield can access
 
-gshield uses a Google account authorized via [`gog`](https://github.com/openclaw/gog), which handles OAuth. The permissions required depend on which surfaces you enable:
+gshield uses a Google account authorized via [`gog`](https://github.com/steipete/gogcli), which handles OAuth. The permissions required depend on which surfaces you enable:
 
 | Surface | Google permission needed |
 |---------|--------------------------|
 | Read unread email | `gmail.readonly` |
 | Send replies | `gmail.send` |
 | Read calendar events | `calendar.readonly` |
+| Create/update calendar events | `calendar` (read/write) |
 
 **The agent never sees these credentials.** It only receives a short-lived signed token (default 2 minutes) issued by gshield in exchange for an API key.
 
@@ -39,6 +40,11 @@ gshield uses a Google account authorized via [`gog`](https://github.com/openclaw
 
 ### Calendar
 - **Can read**: events within the configured time window (default: this week)
+- **Can create/update**: only when `calendarWrite.enabled` is `true` (off by default)
+  - Restricted to calendars in `calendarWrite.allowedCalendarIds` (falls back to `calendar.ids`)
+  - Attendee invites blocked by default (`allowAttendees: false`)
+  - Google notification emails controlled by `sendUpdates` policy (default: `'none'`)
+  - Rate limited: hourly and daily caps on calendar mutations
 - **Location, attendee emails, and meeting URLs** are each off by default — you opt in per field in config
 
 ### Everything else
@@ -90,7 +96,7 @@ npm install
 
 ### 2. Authorize Google access
 
-gshield uses [`gog`](https://github.com/openclaw/gog) to talk to Google. Install it and authorize the account you want the agent to use:
+gshield uses [`gog`](https://github.com/steipete/gogcli) to talk to Google. Install it and authorize the account you want the agent to use:
 
 ```bash
 gog auth --account you@gmail.com
@@ -172,6 +178,26 @@ Body:
 - Defaults to this week when omitted
 - Supports multiple calendars via configured `calendar.ids` or request override
 
+### `POST /v1/calendar/events`
+Create a calendar event. Requires `calendarWrite.enabled: true`.
+
+Body:
+```json
+{"calendarId":"primary","summary":"Meeting","start":"2025-01-15T10:00:00Z","end":"2025-01-15T11:00:00Z","attendees":["a@example.com"],"location":"Room 1"}
+```
+- `attendees` stripped if `calendarWrite.allowAttendees` is `false`
+- `sendUpdates` forced to policy value regardless of request
+
+### `PATCH /v1/calendar/events/:id`
+Update an existing calendar event. Requires `calendarWrite.enabled: true`.
+
+Body:
+```json
+{"calendarId":"primary","summary":"Updated Meeting","start":"2025-01-15T10:00:00Z","end":"2025-01-15T11:30:00Z","addAttendees":["b@example.com"],"location":"Room 2"}
+```
+- `addAttendees` stripped if `calendarWrite.allowAttendees` is `false`
+- `sendUpdates` forced to policy value regardless of request
+
 ### `POST /v1/email/reply`
 Allowed by default subject to allowlist + send caps.
 
@@ -221,6 +247,17 @@ These control what the agent is allowed to read and send.
 | `policy.calendar.allowAttendeeEmails` | `true` | Include attendee names, emails, and RSVP status in responses |
 | `policy.calendar.allowLocation` | `false` | Include the event location field (may contain physical addresses or room names) |
 | `policy.calendar.allowMeetingUrls` | `false` | Include Google Meet links (`hangoutLink`) in responses |
+
+#### Calendar write
+
+| Key | Default | Description |
+|-----|---------|-------------|
+| `policy.calendarWrite.enabled` | `false` | Master switch for calendar create/update. When `false`, both endpoints return `403` |
+| `policy.calendarWrite.allowedCalendarIds` | `[]` | Which calendars are writable. Empty means fall back to `calendar.ids` |
+| `policy.calendarWrite.allowAttendees` | `false` | Whether the agent can add attendees to events. When `false`, attendee fields are silently stripped to prevent spam invites |
+| `policy.calendarWrite.sendUpdates` | `"none"` | Controls Google notification emails: `none`, `all`, or `externalOnly`. Always overrides the request value |
+| `policy.calendarWrite.maxEventsPerHour` | `10` | Rolling hourly cap on calendar create/update operations |
+| `policy.calendarWrite.maxEventsPerDay` | `50` | Rolling daily cap on calendar create/update operations |
 
 #### Outbound email
 

@@ -56,6 +56,18 @@ export interface Provider {
   getCalendarEvents(timeMin: string, timeMax: string, calendarIds?: string[]): Promise<CalendarEvent[]>;
   sendReply(input: { threadId: string; to: string; subject: string; body: string }): Promise<{ id: string }>;
   sendNew(input: { to: string; subject: string; body: string }): Promise<{ id: string }>;
+  createEvent(input: {
+    calendarId: string; summary: string;
+    start: string; end: string;
+    attendees?: string[]; location?: string;
+    sendUpdates?: string;
+  }): Promise<{ id: string }>;
+  updateEvent(input: {
+    calendarId: string; eventId: string;
+    summary?: string; start?: string; end?: string;
+    addAttendees?: string[]; location?: string;
+    sendUpdates?: string;
+  }): Promise<{ id: string }>;
 }
 
 export class GogProvider implements Provider {
@@ -85,6 +97,39 @@ export class GogProvider implements Provider {
     const stdout = await execFileAsync('gog', ['gmail', 'send', '--to', input.to, '--subject', input.subject, '--body', input.body, '--account', this.account]);
     return { id: stdout.trim() || `send-${Date.now()}` };
   }
+
+  async createEvent(input: {
+    calendarId: string; summary: string;
+    start: string; end: string;
+    attendees?: string[]; location?: string;
+    sendUpdates?: string;
+  }): Promise<{ id: string }> {
+    const args = ['calendar', 'create', input.calendarId, '--summary', input.summary, '--from', input.start, '--to', input.end, '--account', this.account];
+    if (input.attendees?.length) args.push('--attendees', input.attendees.join(','));
+    if (input.location) args.push('--location', input.location);
+    if (input.sendUpdates) args.push('--send-updates', input.sendUpdates);
+    const stdout = await execFileAsync('gog', args);
+    return { id: stdout.trim() || `event-${Date.now()}` };
+  }
+
+  async updateEvent(input: {
+    calendarId: string; eventId: string;
+    summary?: string; start?: string; end?: string;
+    addAttendees?: string[]; location?: string;
+    sendUpdates?: string;
+  }): Promise<{ id: string }> {
+    const args = ['calendar', 'update', input.calendarId, input.eventId, '--account', this.account];
+    if (input.summary) args.push('--summary', input.summary);
+    if (input.start) args.push('--from', input.start);
+    if (input.end) args.push('--to', input.end);
+    if (input.addAttendees?.length) {
+      for (const a of input.addAttendees) args.push('--add-attendee', a);
+    }
+    if (input.location) args.push('--location', input.location);
+    if (input.sendUpdates) args.push('--send-updates', input.sendUpdates);
+    const stdout = await execFileAsync('gog', args);
+    return { id: stdout.trim() || input.eventId };
+  }
 }
 
 export class MockProvider implements Provider {
@@ -93,4 +138,6 @@ export class MockProvider implements Provider {
   async getCalendarEvents(_timeMin: string, _timeMax: string, _calendarIds?: string[]): Promise<CalendarEvent[]> { return this.seed.events || []; }
   async sendReply(_input: { threadId: string; to: string; subject: string; body: string }): Promise<{ id: string }> { return { id: 'reply-mock' }; }
   async sendNew(_input: { to: string; subject: string; body: string }): Promise<{ id: string }> { return { id: 'send-mock' }; }
+  async createEvent(_input: { calendarId: string; summary: string; start: string; end: string; attendees?: string[]; location?: string; sendUpdates?: string }): Promise<{ id: string }> { return { id: 'event-mock' }; }
+  async updateEvent(_input: { calendarId: string; eventId: string; summary?: string; start?: string; end?: string; addAttendees?: string[]; location?: string; sendUpdates?: string }): Promise<{ id: string }> { return { id: _input.eventId || 'update-mock' }; }
 }

@@ -10,6 +10,8 @@ import type { WrapperConfig } from '../src/types.ts';
 const auditFile = path.join(os.tmpdir(), `gshield-audit-${Date.now()}.jsonl`);
 process.env.SECURE_WRAPPER_AUDIT = auditFile;
 process.env.SECURE_WRAPPER_REPLAY_DIR = path.join(os.tmpdir(), 'gshield-replay-test');
+process.env.SECURE_WRAPPER_RATE = path.join(os.tmpdir(), `gshield-send-${Date.now()}.json`);
+process.env.SECURE_WRAPPER_CALENDAR_RATE = path.join(os.tmpdir(), `gshield-cal-${Date.now()}.json`);
 
 const cfg: WrapperConfig = {
   server: { port: 0, bind: '127.0.0.1', maxPayloadBytes: 2048, rateLimitPerMinute: 30 },
@@ -19,6 +21,7 @@ const cfg: WrapperConfig = {
   policy: {
     email: { maxRecentDays: 2, authHandlingMode: 'block', threadContextMode: 'full_thread' },
     calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7, allowAttendeeEmails: true, allowLocation: false, allowMeetingUrls: false },
+    calendarWrite: { enabled: false, allowedCalendarIds: [], allowAttendees: false, sendUpdates: 'none' as const, maxEventsPerHour: 10, maxEventsPerDay: 50 },
     outbound: { replyOnlyDefault: true, allowAllRecipients: false, allowReplyToAnyone: true, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
   }
 };
@@ -103,7 +106,9 @@ test('provider exception is contained and returned as upstream_failure', async (
     getUnreadEmails: async () => { throw Object.assign(new Error('boom'), { code: 'GOG_DOWN' }); },
     getCalendarEvents: async () => [],
     sendReply: async () => ({ id: 'x' }),
-    sendNew: async () => ({ id: 'y' })
+    sendNew: async () => ({ id: 'y' }),
+    createEvent: async () => ({ id: 'z' }),
+    updateEvent: async () => ({ id: 'z' })
   });
   const res = await app.fetch(new Request('http://local/v1/email/unread', { headers: { 'x-api-key': 'k123' } }));
   assert.equal(res.status, 502);
@@ -153,4 +158,175 @@ test('calendar privacy: attendees absent when allowAttendeeEmails false', async 
   const data = await res.json() as any;
   const item = data.items[0];
   assert.equal('attendees' in item, false);
+});
+
+// --- Calendar write tests ---
+
+test('calendar create blocked when calendarWrite.enabled is false', async () => {
+  const app = buildApp(cfg, new MockProvider());
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Test', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z' })
+  }));
+  assert.equal(res.status, 403);
+  const data = await res.json() as any;
+  assert.equal(data.error, 'calendar_write_disabled');
+});
+
+test('calendar create succeeds when enabled with valid fields', async () => {
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true } } };
+  const app = buildApp(cwCfg, new MockProvider());
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Team Sync', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z' })
+  }));
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  assert.equal(data.success, true);
+  assert.ok(data.id);
+});
+
+test('calendar create rejects unknown calendarId', async () => {
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true } } };
+  const app = buildApp(cwCfg, new MockProvider());
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'unknown-cal', summary: 'Test', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z' })
+  }));
+  assert.equal(res.status, 403);
+  const data = await res.json() as any;
+  assert.equal(data.error, 'calendar_not_allowed');
+});
+
+test('calendar create returns 400 for missing fields', async () => {
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true } } };
+  const app = buildApp(cwCfg, new MockProvider());
+  const res = await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary' })
+  }));
+  assert.equal(res.status, 400);
+  const data = await res.json() as any;
+  assert.equal(data.error, 'missing_fields');
+});
+
+test('calendar update works with valid eventId', async () => {
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true } } };
+  const app = buildApp(cwCfg, new MockProvider());
+  const res = await app.fetch(new Request('http://local/v1/calendar/events/evt123', {
+    method: 'PATCH', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Updated Meeting' })
+  }));
+  assert.equal(res.status, 200);
+  const data = await res.json() as any;
+  assert.equal(data.success, true);
+});
+
+test('calendar update blocked when calendarWrite.enabled is false', async () => {
+  const app = buildApp(cfg, new MockProvider());
+  const res = await app.fetch(new Request('http://local/v1/calendar/events/evt123', {
+    method: 'PATCH', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Updated' })
+  }));
+  assert.equal(res.status, 403);
+  const data = await res.json() as any;
+  assert.equal(data.error, 'calendar_write_disabled');
+});
+
+test('attendees stripped when allowAttendees is false', async () => {
+  let capturedInput: any = null;
+  const trackingProvider: any = {
+    ...new MockProvider(),
+    createEvent: async (input: any) => { capturedInput = input; return { id: 'tracked' }; },
+    updateEvent: async (input: any) => { capturedInput = input; return { id: 'tracked' }; },
+    getUnreadEmails: async () => [],
+    getCalendarEvents: async () => [],
+    sendReply: async () => ({ id: 'x' }),
+    sendNew: async () => ({ id: 'x' }),
+  };
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true, allowAttendees: false } } };
+  const app = buildApp(cwCfg, trackingProvider);
+
+  // Create: attendees should be stripped
+  await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Test', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z', attendees: ['spam@evil.com'] })
+  }));
+  assert.equal(capturedInput.attendees, undefined);
+
+  // Update: addAttendees should be stripped
+  capturedInput = null;
+  await app.fetch(new Request('http://local/v1/calendar/events/evt1', {
+    method: 'PATCH', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', addAttendees: ['spam@evil.com'] })
+  }));
+  assert.equal(capturedInput.addAttendees, undefined);
+});
+
+test('sendUpdates forced to policy value regardless of request', async () => {
+  let capturedInput: any = null;
+  const trackingProvider: any = {
+    ...new MockProvider(),
+    createEvent: async (input: any) => { capturedInput = input; return { id: 'tracked' }; },
+    updateEvent: async () => ({ id: 'x' }),
+    getUnreadEmails: async () => [],
+    getCalendarEvents: async () => [],
+    sendReply: async () => ({ id: 'x' }),
+    sendNew: async () => ({ id: 'x' }),
+  };
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true, sendUpdates: 'none' } } };
+  const app = buildApp(cwCfg, trackingProvider);
+  await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Test', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z', sendUpdates: 'all' })
+  }));
+  assert.equal(capturedInput.sendUpdates, 'none');
+});
+
+test('rate limiting enforced for calendar mutations', async () => {
+  // Reset calendar rate counter
+  const calRateFile = process.env.SECURE_WRAPPER_CALENDAR_RATE!;
+  fs.rmSync(calRateFile, { force: true });
+
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 200 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true, maxEventsPerHour: 2, maxEventsPerDay: 5 } } };
+  const app = buildApp(cwCfg, new MockProvider());
+  const makeReq = () => app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Test', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z' })
+  }));
+
+  const r1 = await makeReq();
+  assert.equal(r1.status, 200);
+  const r2 = await makeReq();
+  assert.equal(r2.status, 200);
+  const r3 = await makeReq();
+  assert.equal(r3.status, 429);
+});
+
+test('audit log entries for calendar create/update', async () => {
+  fs.rmSync(auditFile, { force: true });
+  // Reset calendar rate counter for this test
+  const calRateFile = process.env.SECURE_WRAPPER_CALENDAR_RATE!;
+  fs.rmSync(calRateFile, { force: true });
+
+  const cwCfg: WrapperConfig = { ...cfg, server: { ...cfg.server, rateLimitPerMinute: 100 }, policy: { ...cfg.policy, calendarWrite: { ...cfg.policy.calendarWrite, enabled: true } } };
+  const app = buildApp(cwCfg, new MockProvider());
+
+  await app.fetch(new Request('http://local/v1/calendar/events', {
+    method: 'POST', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Audit Test', start: '2025-01-15T10:00:00Z', end: '2025-01-15T11:00:00Z' })
+  }));
+
+  await app.fetch(new Request('http://local/v1/calendar/events/evt456', {
+    method: 'PATCH', headers: { 'x-api-key': 'k123', 'content-type': 'application/json' },
+    body: JSON.stringify({ calendarId: 'primary', summary: 'Updated Audit' })
+  }));
+
+  const lines = fs.readFileSync(auditFile, 'utf8').trim().split('\n').map((l) => JSON.parse(l));
+  const createEntry = lines.find((l: any) => l.action === 'calendar_create');
+  const updateEntry = lines.find((l: any) => l.action === 'calendar_update');
+  assert.ok(createEntry, 'expected calendar_create audit entry');
+  assert.equal(createEntry.calendarId, 'primary');
+  assert.ok(updateEntry, 'expected calendar_update audit entry');
+  assert.equal(updateEntry.eventId, 'evt456');
 });

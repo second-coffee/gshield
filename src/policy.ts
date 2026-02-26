@@ -77,3 +77,8 @@ export function allowedRecipient(
   if (allowDomains.map((x) => x.toLowerCase().trim()).includes(domain)) return true;
   return false;
 }
+
+export function allowedCalendarForWrite(calendarId: string, allowedIds: string[], configIds: string[]): boolean {
+  const writableSet = allowedIds.length > 0 ? allowedIds : configIds;
+  return writableSet.includes(calendarId);
+}

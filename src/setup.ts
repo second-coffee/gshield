@@ -48,6 +48,14 @@ const cfg: WrapperConfig = {
       allowLocation: false,
       allowMeetingUrls: false,
     },
+    calendarWrite: {
+      enabled: false,
+      allowedCalendarIds: [],
+      allowAttendees: false,
+      sendUpdates: 'none' as const,
+      maxEventsPerHour: 10,
+      maxEventsPerDay: 50,
+    },
     outbound: {
       replyOnlyDefault: true,
       allowAllRecipients: false,

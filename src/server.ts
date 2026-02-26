@@ -2,10 +2,10 @@ import { Hono } from 'hono';
 import { serve } from '@hono/node-server';
 import { loadConfig } from './config.ts';
 import { authenticate, issueSignedToken, startReplaySweeper } from './auth.ts';
-import { clampCalendarRange, clampEmailDays, allowedRecipient } from './policy.ts';
+import { clampCalendarRange, clampEmailDays, allowedRecipient, allowedCalendarForWrite } from './policy.ts';
 import { classifyAuthSensitive } from './redaction.ts';
 import { logAudit } from './audit.ts';
-import { consumeSendQuota } from './rate-limit.ts';
+import { consumeSendQuota, consumeCalendarQuota } from './rate-limit.ts';
 import { GogProvider, MockProvider, type Provider } from './provider.ts';
 import type { WrapperConfig } from './types.ts';
 
@@ -205,6 +205,41 @@ export function buildApp(cfg: WrapperConfig, provider?: Provider) {
       allowMeetingUrls: calPol.allowMeetingUrls,
     });
     return c.json({ start: range.start.toISOString(), end: range.end.toISOString(), calendars: calendarIds, count: items.length, items });
+  });
+
+  app.post('/v1/calendar/events', async (c) => {
+    const cwPol = cfg.policy.calendarWrite;
+    if (!cwPol.enabled) return asErr(c, 403, 'calendar_write_disabled');
+    const body = await parseJsonLimited(c, cfg.server.maxPayloadBytes);
+    if (!body.ok) return asErr(c, body.error === 'payload_too_large' ? 413 : 400, body.error);
+    const { calendarId, summary, start, end, location } = body.body;
+    if (!calendarId || !summary || !start || !end) return asErr(c, 400, 'missing_fields');
+    if (!allowedCalendarForWrite(calendarId, cwPol.allowedCalendarIds, cfg.calendar.ids)) return asErr(c, 403, 'calendar_not_allowed');
+    const attendees = cwPol.allowAttendees ? (body.body.attendees || undefined) : undefined;
+    const sendUpdates = cwPol.sendUpdates;
+    const lim = consumeCalendarQuota(cwPol.maxEventsPerHour, cwPol.maxEventsPerDay);
+    if (!lim.ok) return asErr(c, 429, lim.reason || 'rate_limited');
+    const result = await p.createEvent({ calendarId, summary, start, end, attendees, location, sendUpdates });
+    audit(c, { action: 'calendar_create', calendarId, summary, id: result.id });
+    return c.json({ success: true, id: result.id });
+  });
+
+  app.patch('/v1/calendar/events/:id', async (c) => {
+    const cwPol = cfg.policy.calendarWrite;
+    if (!cwPol.enabled) return asErr(c, 403, 'calendar_write_disabled');
+    const body = await parseJsonLimited(c, cfg.server.maxPayloadBytes);
+    if (!body.ok) return asErr(c, body.error === 'payload_too_large' ? 413 : 400, body.error);
+    const eventId = c.req.param('id');
+    const { calendarId, summary, start, end, location } = body.body;
+    if (!calendarId) return asErr(c, 400, 'missing_fields');
+    if (!allowedCalendarForWrite(calendarId, cwPol.allowedCalendarIds, cfg.calendar.ids)) return asErr(c, 403, 'calendar_not_allowed');
+    const addAttendees = cwPol.allowAttendees ? (body.body.addAttendees || undefined) : undefined;
+    const sendUpdates = cwPol.sendUpdates;
+    const lim = consumeCalendarQuota(cwPol.maxEventsPerHour, cwPol.maxEventsPerDay);
+    if (!lim.ok) return asErr(c, 429, lim.reason || 'rate_limited');
+    const result = await p.updateEvent({ calendarId, eventId, summary, start, end, addAttendees, location, sendUpdates });
+    audit(c, { action: 'calendar_update', calendarId, eventId, id: result.id });
+    return c.json({ success: true, id: result.id });
   });
 
   app.post('/v1/email/reply', async (c) => {

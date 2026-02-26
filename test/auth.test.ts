@@ -18,6 +18,7 @@ const cfg: WrapperConfig = {
   policy: {
     email: { maxRecentDays: 2, authHandlingMode: 'block', threadContextMode: 'full_thread' },
     calendar: { defaultThisWeek: true, maxPastDays: 0, maxFutureDays: 7, allowAttendeeEmails: true, allowLocation: false, allowMeetingUrls: false },
+    calendarWrite: { enabled: false, allowedCalendarIds: [], allowAttendees: false, sendUpdates: 'none' as const, maxEventsPerHour: 10, maxEventsPerDay: 50 },
     outbound: { replyOnlyDefault: true, allowAllRecipients: false, allowReplyToAnyone: true, recipientAllowlist: ['ok@example.com'], domainAllowlist: [], maxSendsPerHour: 5, maxSendsPerDay: 20 }
   }
 };

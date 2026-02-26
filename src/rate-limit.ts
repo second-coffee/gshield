@@ -5,8 +5,10 @@ const ensuredDirs = new Set<string>();
 
 type Counter = { hourKey: string; dayKey: string; hourCount: number; dayCount: number };
 
-function paths() {
-  const file = process.env.SECURE_WRAPPER_RATE || path.join(process.cwd(), 'logs', 'send-counters.json');
+function paths(kind: 'send' | 'calendar' = 'send') {
+  const envKey = kind === 'calendar' ? 'SECURE_WRAPPER_CALENDAR_RATE' : 'SECURE_WRAPPER_RATE';
+  const defaultFile = kind === 'calendar' ? 'calendar-counters.json' : 'send-counters.json';
+  const file = process.env[envKey] || path.join(process.cwd(), 'logs', defaultFile);
   return { file, lock: `${file}.lock` };
 }
 
@@ -35,8 +37,8 @@ function save(file: string, c: Counter) {
   fs.writeFileSync(file, JSON.stringify(c, null, 2));
 }
 
-function withLock<T>(fn: () => T): T {
-  const p = paths();
+function withLock<T>(kind: 'send' | 'calendar', fn: () => T): T {
+  const p = paths(kind);
   ensureDir(p.file);
   for (let i = 0; i < 200; i += 1) {
     try {
@@ -79,9 +81,25 @@ export function recordSend(): void {
 }
 
 export function consumeSendQuota(maxHour: number, maxDay: number): { ok: boolean; reason?: string } {
-  return withLock(() => {
+  return withLock('send', () => {
     const nowKeys = keys();
-    const p = paths();
+    const p = paths('send');
+    const c = load(p.file);
+    if (c.hourKey !== nowKeys.hourKey) { c.hourKey = nowKeys.hourKey; c.hourCount = 0; }
+    if (c.dayKey !== nowKeys.dayKey) { c.dayKey = nowKeys.dayKey; c.dayCount = 0; }
+    if (c.hourCount >= maxHour) return { ok: false, reason: 'hour_limit_exceeded' };
+    if (c.dayCount >= maxDay) return { ok: false, reason: 'day_limit_exceeded' };
+    c.hourCount += 1;
+    c.dayCount += 1;
+    save(p.file, c);
+    return { ok: true };
+  });
+}
+
+export function consumeCalendarQuota(maxHour: number, maxDay: number): { ok: boolean; reason?: string } {
+  return withLock('calendar', () => {
+    const nowKeys = keys();
+    const p = paths('calendar');
     const c = load(p.file);
     if (c.hourKey !== nowKeys.hourKey) { c.hourKey = nowKeys.hourKey; c.hourCount = 0; }
     if (c.dayKey !== nowKeys.dayKey) { c.dayKey = nowKeys.dayKey; c.dayCount = 0; }
